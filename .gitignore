@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+
+# Test and tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Local runtime outputs
+outputs/
+tmp/
+logs/
+
+# Large input media
+*.mp4
+*.mov
+*.mkv
+*.avi
+
+# Local secrets/config
+.env
+.env.*
+credentials/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
