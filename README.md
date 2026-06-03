@@ -25,8 +25,10 @@ python -m storm_surge_border \
 Current Stage-1 status:
 - Aligns two videos by manual offset and builds a 0.1s timeline.
 - Uses central-bottom HP ROI, central reticle ROI, top-right surge ROI definitions.
+- Estimates received damage from central-bottom HP bar changes on both videos.
+- Reflects cumulative received damage as `duo_damage_diff` (current stage: dealt damage is not included yet).
 - Writes estimate CSV, review CSV for manual shaping, and border PNG.
-- OCR/event extraction logic is intentionally left as placeholder and will be added next.
+- Reads surge gap and side (above/below) from top-right OCR with carry-forward between OCR intervals.
 
 ## Tests
 

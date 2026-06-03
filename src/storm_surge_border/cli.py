@@ -50,6 +50,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="outputs/estimated_border.png",
         help="Output path for border chart png",
     )
+    parser.add_argument(
+        "--ocr-interval",
+        type=float,
+        default=1.0,
+        help="OCR execution interval in seconds",
+    )
     return parser
 
 
@@ -66,6 +72,7 @@ def main() -> int:
         out_review_csv=ns.out_review_csv,
         corrections_csv=ns.corrections_csv,
         out_png=ns.out_png,
+        ocr_interval=ns.ocr_interval,
     )
     result = run_pipeline(args)
     print(f"done: estimates={len(result.estimates)} review_rows={len(result.review_rows)}")
