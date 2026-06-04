@@ -47,7 +47,7 @@ def read_surge_from_frame(
 ) -> SurgeOcrValue:
     import cv2
 
-    if frame is None:
+    if frame is None or reader is None:
         return SurgeOcrValue(None, None, 0.0, "")
 
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)

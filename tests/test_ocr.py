@@ -1,4 +1,6 @@
-from storm_surge_border.ocr import extract_surge_from_ocr_results
+import numpy as np
+
+from storm_surge_border.ocr import extract_surge_from_ocr_results, read_surge_from_frame
 
 
 def test_extract_surge_with_above_text() -> None:
@@ -32,3 +34,11 @@ def test_extract_surge_no_number() -> None:
     )
     assert res.gap_value is None
     assert res.is_above_border is True
+
+
+def test_read_surge_from_frame_with_none_reader_returns_empty() -> None:
+    frame = np.zeros((10, 10, 3), dtype=np.uint8)
+    res = read_surge_from_frame(frame, None)
+    assert res.gap_value is None
+    assert res.is_above_border is None
+    assert res.confidence == 0.0
