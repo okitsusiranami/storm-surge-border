@@ -13,7 +13,8 @@ def test_timestamp_to_frame_index_clamps() -> None:
 
 
 def test_timestamp_to_frame_index_unknown_frame_count_defaults_zero() -> None:
-    assert timestamp_to_frame_index(3.0, 30.0, 0) == 0
+    # Unknown frame_count keeps timestamp-based index without upper clamp.
+    assert timestamp_to_frame_index(3.0, 30.0, 0) == 90
 
 
 def test_video_frame_reader_unknown_frame_count_uses_msec_seek(monkeypatch, tmp_path) -> None:
