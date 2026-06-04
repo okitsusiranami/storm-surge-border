@@ -12,6 +12,7 @@ class EstimateRow:
     is_above_border: Optional[bool]
     estimated_border: Optional[float]
     confidence: float
+    estimated_border_status: str = "unknown"
     source_flags: str = ""
 
 

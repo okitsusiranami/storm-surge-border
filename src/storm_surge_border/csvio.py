@@ -19,6 +19,7 @@ def write_estimates_csv(file_path: str, rows: list[EstimateRow]) -> None:
                 "is_above_border",
                 "estimated_border",
                 "confidence",
+                "estimated_border_status",
                 "source_flags",
             ]
         )
@@ -31,6 +32,7 @@ def write_estimates_csv(file_path: str, rows: list[EstimateRow]) -> None:
                     "" if row.is_above_border is None else str(row.is_above_border),
                     _fmt_optional_float(row.estimated_border),
                     f"{row.confidence:.3f}",
+                    row.estimated_border_status,
                     row.source_flags,
                 ]
             )

@@ -16,17 +16,31 @@ python -m storm_surge_border \
 	--video-b path/to/duo_b.mp4 \
 	--offset-sec 0.0 \
 	--sample-interval 0.1 \
+	--surge-source-video a \
+	--ocr-min-confidence-for-border 0.4 \
 	--out-csv outputs/estimated_border.csv \
 	--out-review-csv outputs/review_candidates.csv \
 	--corrections-csv outputs/review_candidates.csv \
 	--out-png outputs/estimated_border.png
 ```
 
+If `easyocr` is not installed and you still want to run HP-only flow, use:
+
+```bash
+python -m storm_surge_border ... --allow-missing-easyocr
+```
+
 Current Stage-1 status:
 - Aligns two videos by manual offset and builds a 0.1s timeline.
 - Uses central-bottom HP ROI, central reticle ROI, top-right surge ROI definitions.
+- Estimates received damage from central-bottom HP bar changes on both videos.
+- Reflects cumulative received damage as `duo_damage_diff` (current stage: dealt damage is not included yet).
 - Writes estimate CSV, review CSV for manual shaping, and border PNG.
-- OCR/event extraction logic is intentionally left as placeholder and will be added next.
+- Reads surge gap and side (above/below) from top-right OCR with carry-forward between OCR intervals.
+- Skips `estimated_border` computation when OCR confidence is below `--ocr-min-confidence-for-border`.
+- Marks carry-based border rows with `border-provisional-carry` in `source_flags`.
+- Adds `estimated_border_status` column to explain why border is computed/skipped.
+- Emits `hp-provisional` when a short damage sequence ends before `--hp-confirm-frames`.
 
 ## Tests
 
