@@ -10,9 +10,9 @@ from .models import VideoMeta
 def timestamp_to_frame_index(timestamp_sec: float, fps: float, frame_count: int) -> int:
     if fps <= 0:
         raise ValueError("fps must be > 0")
-    if frame_count <= 0:
-        return 0
     idx = int(round(max(0.0, timestamp_sec) * fps))
+    if frame_count <= 0:
+        return max(0, idx)
     return max(0, min(frame_count - 1, idx))
 
 

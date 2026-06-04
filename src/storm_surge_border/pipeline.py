@@ -142,26 +142,31 @@ def run_pipeline(args: PipelineArgs) -> PipelineResult:
                     source_flags.append("ocr-side")
                 else:
                     source_flags.append("missing-ocr-side")
-                last_conf = ocr_value.confidence
+                if ocr_value.gap_value is not None and ocr_value.is_above_border is not None:
+                    last_conf = ocr_value.confidence
                 last_ocr_ts = ts
                 frame_confidence = last_conf
             else:
-                source_flags.append("ocr-carry")
-                frame_confidence = _decay_carry_confidence(
-                    base_confidence=last_conf,
-                    last_ocr_ts=last_ocr_ts,
-                    current_ts=ts,
-                    decay_per_sec=args.ocr_confidence_decay_per_sec,
-                )
-                if frame_confidence < last_conf:
-                    source_flags.append("ocr-conf-decay")
+                if reader is None:
+                    source_flags.append("missing-easyocr")
+                    frame_confidence = 0.0
+                else:
+                    source_flags.append("ocr-carry")
+                    frame_confidence = _decay_carry_confidence(
+                        base_confidence=last_conf,
+                        last_ocr_ts=last_ocr_ts,
+                        current_ts=ts,
+                        decay_per_sec=args.ocr_confidence_decay_per_sec,
+                    )
+                    if frame_confidence < last_conf:
+                        source_flags.append("ocr-conf-decay")
 
             if last_ocr_ts is not None and (ts - last_ocr_ts) > args.ocr_stale_timeout_sec:
                 if last_gap_value is not None or last_side is not None:
                     source_flags.append("ocr-stale-reset")
                 last_gap_value = None
                 last_side = None
-
+                last_conf = 0.0
             # Stage-1 combines duo-received-damage with surge text read from video A.
             duo_damage_diff = -cumulative_received
             estimated_border = None
