@@ -11,9 +11,11 @@ from .core import (
     roi_to_pixel_rect,
 )
 from .csvio import read_review_csv, write_estimates_csv, write_review_csv
-from .hp import detect_received_damage, estimate_hp_ratio_from_roi
+from .hp import estimate_hp_ratio_from_roi
+from .hp_tracker import HpDamageTracker
 from .models import EstimateRow, PipelineResult
 from .ocr import read_surge_from_frame
+from .ocr_state import OcrStateTracker
 from .plotting import write_plot_png
 from .video import VideoFrameReader, read_video_meta
 
@@ -57,21 +59,23 @@ def run_pipeline(args: PipelineArgs) -> PipelineResult:
     top_right_rect = roi_to_pixel_rect(meta_a.width, meta_a.height, rois.top_right_surge)
 
     reader = _build_easyocr_reader()
+    ocr_state = OcrStateTracker()
+    hp_a = HpDamageTracker(
+        max_pool=args.hp_max_pool,
+        min_drop_ratio=args.hp_min_drop_ratio,
+        max_drop_ratio=args.hp_max_drop_ratio,
+        confirm_frames=args.hp_confirm_frames,
+        smoothing_alpha=args.hp_smoothing_alpha,
+    )
+    hp_b = HpDamageTracker(
+        max_pool=args.hp_max_pool,
+        min_drop_ratio=args.hp_min_drop_ratio,
+        max_drop_ratio=args.hp_max_drop_ratio,
+        confirm_frames=args.hp_confirm_frames,
+        smoothing_alpha=args.hp_smoothing_alpha,
+    )
+
     estimates: list[EstimateRow] = []
-    last_ocr_ts: float | None = None
-    last_gap_value: float | None = None
-    last_side: bool | None = None
-    last_conf: float = 0.0
-    prev_hp_a: float | None = None
-    prev_hp_b: float | None = None
-    raw_hp_a: float | None = None
-    raw_hp_b: float | None = None
-    streak_a = 0
-    streak_b = 0
-    pending_a = 0.0
-    pending_b = 0.0
-    confirmed_a = False
-    confirmed_b = False
     cumulative_received = 0.0
 
     with VideoFrameReader(args.video_a) as reader_a, VideoFrameReader(args.video_b) as reader_b:
@@ -79,112 +83,52 @@ def run_pipeline(args: PipelineArgs) -> PipelineResult:
             frame_a = reader_a.read_at(ts)
             frame_b = reader_b.read_at(ts - args.offset_sec)
 
-            run_ocr = reader is not None and (
-                last_ocr_ts is None or (ts - last_ocr_ts) >= args.ocr_interval
-            )
+            run_ocr = reader is not None and ocr_state.should_attempt(ts, args.ocr_interval)
             source_flags = []
 
             hp_roi_a = _crop(frame_a, hp_rect_a)
             hp_roi_b = _crop(frame_b, hp_rect_b)
             curr_raw_a = estimate_hp_ratio_from_roi(hp_roi_a)
             curr_raw_b = estimate_hp_ratio_from_roi(hp_roi_b)
-            hp_ratio_a = _smooth_ratio(raw_hp_a, curr_raw_a, args.hp_smoothing_alpha)
-            hp_ratio_b = _smooth_ratio(raw_hp_b, curr_raw_b, args.hp_smoothing_alpha)
-            raw_hp_a = curr_raw_a if curr_raw_a is not None else raw_hp_a
-            raw_hp_b = curr_raw_b if curr_raw_b is not None else raw_hp_b
-
-            dmg_a = detect_received_damage(
-                prev_hp_a,
-                hp_ratio_a,
-                max_pool=args.hp_max_pool,
-                min_drop_ratio=args.hp_min_drop_ratio,
-                max_drop_ratio=args.hp_max_drop_ratio,
-            )
-            dmg_b = detect_received_damage(
-                prev_hp_b,
-                hp_ratio_b,
-                max_pool=args.hp_max_pool,
-                min_drop_ratio=args.hp_min_drop_ratio,
-                max_drop_ratio=args.hp_max_drop_ratio,
-            )
-            add_a, streak_a, pending_a, confirmed_a = _confirm_damage(
-                dmg_a,
-                streak_a,
-                pending_a,
-                args.hp_confirm_frames,
-                confirmed_a,
-            )
-            add_b, streak_b, pending_b, confirmed_b = _confirm_damage(
-                dmg_b,
-                streak_b,
-                pending_b,
-                args.hp_confirm_frames,
-                confirmed_b,
-            )
+            add_a, flags_a = hp_a.update(curr_raw_a)
+            add_b, flags_b = hp_b.update(curr_raw_b)
             cumulative_received += add_a + add_b
-            source_flags.extend([dmg_a.flag, dmg_b.flag, "damage-source-duo"])
-
-            if hp_ratio_a is not None:
-                prev_hp_a = hp_ratio_a
-            if hp_ratio_b is not None:
-                prev_hp_b = hp_ratio_b
+            source_flags.extend(flags_a)
+            source_flags.extend(flags_b)
+            source_flags.append("damage-source-duo")
 
             if run_ocr:
                 surge_roi = _crop(frame_a, top_right_rect)
                 ocr_value = read_surge_from_frame(surge_roi, reader)
-                if ocr_value.gap_value is not None:
-                    last_gap_value = ocr_value.gap_value
-                    source_flags.append("ocr-gap")
-                else:
-                    source_flags.append("missing-ocr-gap")
-                if ocr_value.is_above_border is not None:
-                    last_side = ocr_value.is_above_border
-                    source_flags.append("ocr-side")
-                else:
-                    source_flags.append("missing-ocr-side")
-                if ocr_value.gap_value is not None and ocr_value.is_above_border is not None:
-                    last_conf = ocr_value.confidence
-                last_ocr_ts = ts
-                frame_confidence = last_conf
+                source_flags.extend(ocr_state.record_attempt(ts, ocr_value))
             else:
                 if reader is None:
                     source_flags.append("missing-easyocr")
-                    frame_confidence = 0.0
-                else:
-                    source_flags.append("ocr-carry")
-                    frame_confidence = _decay_carry_confidence(
-                        base_confidence=last_conf,
-                        last_ocr_ts=last_ocr_ts,
-                        current_ts=ts,
-                        decay_per_sec=args.ocr_confidence_decay_per_sec,
-                    )
-                    if frame_confidence < last_conf:
-                        source_flags.append("ocr-conf-decay")
 
-            if last_ocr_ts is not None and (ts - last_ocr_ts) > args.ocr_stale_timeout_sec:
-                if last_gap_value is not None or last_side is not None:
-                    source_flags.append("ocr-stale-reset")
-                last_gap_value = None
-                last_side = None
-                last_conf = 0.0
-                frame_confidence = 0.0
+            surge_gap_value, is_above_border, frame_confidence, ocr_flags = ocr_state.effective_value(
+                ts,
+                decay_per_sec=args.ocr_confidence_decay_per_sec,
+                stale_timeout_sec=args.ocr_stale_timeout_sec,
+            )
+            source_flags.extend(ocr_flags)
+
             # Stage-1 combines duo-received-damage with surge text read from video A.
             duo_damage_diff = -cumulative_received
             estimated_border = None
-            if last_gap_value is not None and last_side is not None:
+            if surge_gap_value is not None and is_above_border is not None:
                 source_flags.append("surge-source-a")
                 estimated_border = calculate_estimated_border(
                     duo_damage_diff=duo_damage_diff,
-                    surge_gap_value=last_gap_value,
-                    is_above_border=last_side,
+                    surge_gap_value=surge_gap_value,
+                    is_above_border=is_above_border,
                 )
 
             estimates.append(
                 EstimateRow(
                     timestamp_sec=ts,
                     duo_damage_diff=duo_damage_diff,
-                    surge_gap_value=last_gap_value,
-                    is_above_border=last_side,
+                    surge_gap_value=surge_gap_value,
+                    is_above_border=is_above_border,
                     estimated_border=estimated_border,
                     confidence=frame_confidence,
                     source_flags="|".join(source_flags),
@@ -258,24 +202,3 @@ def _smooth_ratio(prev: float | None, curr: float | None, alpha: float) -> float
     if prev is None:
         return curr
     return (alpha * curr) + ((1.0 - alpha) * prev)
-
-
-def _confirm_damage(
-    event,
-    streak: int,
-    pending: float,
-    confirm_frames: int,
-    confirmed: bool,
-) -> tuple[float, int, float, bool]:
-    if event.damage <= 0:
-        return 0.0, 0, 0.0, False
-
-    if confirmed:
-        # Keep blocking re-add during one continuous drop sequence.
-        return 0.0, max(streak, confirm_frames), 0.0, True
-
-    streak += 1
-    pending += event.damage
-    if streak == confirm_frames:
-        return pending, streak, 0.0, True
-    return 0.0, streak, pending, False

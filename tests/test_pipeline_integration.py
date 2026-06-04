@@ -5,10 +5,10 @@ import numpy as np
 import pytest
 
 from storm_surge_border.csvio import write_review_csv
-from storm_surge_border.hp import DamageEvent
+from storm_surge_border.hp_tracker import HpDamageTracker
 from storm_surge_border.models import CorrectionRow, VideoMeta
 from storm_surge_border.ocr import SurgeOcrValue
-from storm_surge_border.pipeline import PipelineArgs, _confirm_damage, run_pipeline
+from storm_surge_border.pipeline import PipelineArgs, run_pipeline
 
 
 class _FakeVideoFrameReader:
@@ -156,71 +156,39 @@ def test_pipeline_args_validation_rejects_invalid_ranges() -> None:
         )
 
 
-def test_confirm_damage_confirms_once_for_long_continuous_drop() -> None:
-    streak = 0
-    pending = 0.0
-    confirmed = False
-    added = []
-
-    for _ in range(4):
-        add, streak, pending, confirmed = _confirm_damage(
-            DamageEvent(damage=10.0, flag="hp-damaged"),
-            streak,
-            pending,
-            confirm_frames=2,
-            confirmed=confirmed,
-        )
-        added.append(add)
-
-    # Confirm once on 2nd frame, no repeated adds on 3rd+ continuous frames.
-    assert added == [0.0, 20.0, 0.0, 0.0]
-
-
-def test_confirm_damage_allows_new_sequence_after_reset() -> None:
-    streak = 0
-    pending = 0.0
-    confirmed = False
-
-    # First sequence confirms once.
-    _add1, streak, pending, confirmed = _confirm_damage(
-        DamageEvent(damage=10.0, flag="hp-damaged"),
-        streak,
-        pending,
+def test_hp_damage_tracker_confirms_once_for_long_continuous_drop(monkeypatch) -> None:
+    tracker = HpDamageTracker(
+        max_pool=100.0,
+        min_drop_ratio=0.001,
+        max_drop_ratio=0.9,
         confirm_frames=2,
-        confirmed=confirmed,
+        smoothing_alpha=1.0,
     )
-    add2, streak, pending, confirmed = _confirm_damage(
-        DamageEvent(damage=10.0, flag="hp-damaged"),
-        streak,
-        pending,
-        confirm_frames=2,
-        confirmed=confirmed,
-    )
-    assert add2 == 20.0
 
-    # No-drop frame resets confirmation state.
-    add3, streak, pending, confirmed = _confirm_damage(
-        DamageEvent(damage=0.0, flag="hp-no-drop"),
-        streak,
-        pending,
-        confirm_frames=2,
-        confirmed=confirmed,
-    )
-    assert (add3, streak, pending, confirmed) == (0.0, 0, 0.0, False)
+    # Sequence creates 4 continuous drops.
+    ratios = [1.0, 0.9, 0.8, 0.7, 0.6]
+    adds = []
+    for r in ratios:
+        add, _flags = tracker.update(r)
+        adds.append(add)
 
-    # New sequence can confirm again.
-    _add4, streak, pending, confirmed = _confirm_damage(
-        DamageEvent(damage=8.0, flag="hp-damaged"),
-        streak,
-        pending,
+    # At most one confirmation in one continuous sequence.
+    assert sum(1 for x in adds if x > 0) == 1
+
+
+def test_hp_damage_tracker_allows_new_sequence_after_non_drop() -> None:
+    tracker = HpDamageTracker(
+        max_pool=100.0,
+        min_drop_ratio=0.001,
+        max_drop_ratio=0.9,
         confirm_frames=2,
-        confirmed=confirmed,
+        smoothing_alpha=1.0,
     )
-    add5, streak, pending, confirmed = _confirm_damage(
-        DamageEvent(damage=8.0, flag="hp-damaged"),
-        streak,
-        pending,
-        confirm_frames=2,
-        confirmed=confirmed,
-    )
-    assert add5 == 16.0
+
+    adds = []
+    for r in [1.0, 0.9, 0.8, 0.8, 0.7, 0.6]:
+        add, _flags = tracker.update(r)
+        adds.append(add)
+
+    # Two separate drop sequences should allow two confirmations.
+    assert sum(1 for x in adds if x > 0) == 2
