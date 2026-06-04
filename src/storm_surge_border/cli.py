@@ -75,10 +75,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum ratio drop before treating as outlier",
     )
     parser.add_argument(
+        "--hp-confirm-frames",
+        type=int,
+        default=2,
+        help="Frames required to confirm received damage accumulation",
+    )
+    parser.add_argument(
+        "--hp-smoothing-alpha",
+        type=float,
+        default=0.5,
+        help="EMA alpha for HP ratio smoothing (0-1)",
+    )
+    parser.add_argument(
         "--ocr-confidence-decay-per-sec",
         type=float,
         default=0.03,
         help="Confidence decay applied per second while OCR value is carried forward",
+    )
+    parser.add_argument(
+        "--ocr-stale-timeout-sec",
+        type=float,
+        default=15.0,
+        help="Timeout after which carried OCR values are invalidated",
     )
     return parser
 
@@ -100,7 +118,10 @@ def main() -> int:
         hp_max_pool=ns.hp_max_pool,
         hp_min_drop_ratio=ns.hp_min_drop_ratio,
         hp_max_drop_ratio=ns.hp_max_drop_ratio,
+        hp_confirm_frames=ns.hp_confirm_frames,
+        hp_smoothing_alpha=ns.hp_smoothing_alpha,
         ocr_confidence_decay_per_sec=ns.ocr_confidence_decay_per_sec,
+        ocr_stale_timeout_sec=ns.ocr_stale_timeout_sec,
     )
     result = run_pipeline(args)
     print(f"done: estimates={len(result.estimates)} review_rows={len(result.review_rows)}")

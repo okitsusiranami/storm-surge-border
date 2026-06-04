@@ -33,10 +33,15 @@ class PipelineArgs:
     hp_max_pool: float = 200.0
     hp_min_drop_ratio: float = 0.005
     hp_max_drop_ratio: float = 0.45
+    hp_confirm_frames: int = 2
+    hp_smoothing_alpha: float = 0.5
     ocr_confidence_decay_per_sec: float = 0.03
+    ocr_stale_timeout_sec: float = 15.0
 
 
 def run_pipeline(args: PipelineArgs) -> PipelineResult:
+    _validate_args(args)
+
     meta_a = read_video_meta(args.video_a)
     meta_b = read_video_meta(args.video_b)
     timeline = build_aligned_timeline(
@@ -59,6 +64,12 @@ def run_pipeline(args: PipelineArgs) -> PipelineResult:
     last_conf: float = 0.0
     prev_hp_a: float | None = None
     prev_hp_b: float | None = None
+    raw_hp_a: float | None = None
+    raw_hp_b: float | None = None
+    streak_a = 0
+    streak_b = 0
+    pending_a = 0.0
+    pending_b = 0.0
     cumulative_received = 0.0
 
     with VideoFrameReader(args.video_a) as reader_a, VideoFrameReader(args.video_b) as reader_b:
@@ -74,8 +85,12 @@ def run_pipeline(args: PipelineArgs) -> PipelineResult:
 
             hp_roi_a = _crop(frame_a, hp_rect_a)
             hp_roi_b = _crop(frame_b, hp_rect_b)
-            hp_ratio_a = estimate_hp_ratio_from_roi(hp_roi_a)
-            hp_ratio_b = estimate_hp_ratio_from_roi(hp_roi_b)
+            curr_raw_a = estimate_hp_ratio_from_roi(hp_roi_a)
+            curr_raw_b = estimate_hp_ratio_from_roi(hp_roi_b)
+            hp_ratio_a = _smooth_ratio(raw_hp_a, curr_raw_a, args.hp_smoothing_alpha)
+            hp_ratio_b = _smooth_ratio(raw_hp_b, curr_raw_b, args.hp_smoothing_alpha)
+            raw_hp_a = curr_raw_a if curr_raw_a is not None else raw_hp_a
+            raw_hp_b = curr_raw_b if curr_raw_b is not None else raw_hp_b
 
             dmg_a = detect_received_damage(
                 prev_hp_a,
@@ -91,8 +106,20 @@ def run_pipeline(args: PipelineArgs) -> PipelineResult:
                 min_drop_ratio=args.hp_min_drop_ratio,
                 max_drop_ratio=args.hp_max_drop_ratio,
             )
-            cumulative_received += dmg_a.damage + dmg_b.damage
-            source_flags.extend([dmg_a.flag, dmg_b.flag])
+            add_a, streak_a, pending_a = _confirm_damage(
+                dmg_a,
+                streak_a,
+                pending_a,
+                args.hp_confirm_frames,
+            )
+            add_b, streak_b, pending_b = _confirm_damage(
+                dmg_b,
+                streak_b,
+                pending_b,
+                args.hp_confirm_frames,
+            )
+            cumulative_received += add_a + add_b
+            source_flags.extend([dmg_a.flag, dmg_b.flag, "damage-source-duo"])
 
             if hp_ratio_a is not None:
                 prev_hp_a = hp_ratio_a
@@ -126,10 +153,17 @@ def run_pipeline(args: PipelineArgs) -> PipelineResult:
                 if frame_confidence < last_conf:
                     source_flags.append("ocr-conf-decay")
 
-            # Stage-1 now estimates duo damage diff from cumulative received damage.
+            if last_ocr_ts is not None and (ts - last_ocr_ts) > args.ocr_stale_timeout_sec:
+                if last_gap_value is not None or last_side is not None:
+                    source_flags.append("ocr-stale-reset")
+                last_gap_value = None
+                last_side = None
+
+            # Stage-1 combines duo-received-damage with surge text read from video A.
             duo_damage_diff = -cumulative_received
             estimated_border = None
             if last_gap_value is not None and last_side is not None:
+                source_flags.append("surge-source-a")
                 estimated_border = calculate_estimated_border(
                     duo_damage_diff=duo_damage_diff,
                     surge_gap_value=last_gap_value,
@@ -188,3 +222,46 @@ def _decay_carry_confidence(
     elapsed = max(0.0, current_ts - last_ocr_ts)
     decayed = base_confidence - (elapsed * max(0.0, decay_per_sec))
     return max(0.0, decayed)
+
+
+def _validate_args(args: PipelineArgs) -> None:
+    if args.sample_interval <= 0:
+        raise ValueError("sample_interval must be > 0")
+    if args.ocr_interval <= 0:
+        raise ValueError("ocr_interval must be > 0")
+    if args.hp_max_pool <= 0:
+        raise ValueError("hp_max_pool must be > 0")
+    if not (0.0 <= args.hp_min_drop_ratio < args.hp_max_drop_ratio <= 1.0):
+        raise ValueError("hp drop ratios must satisfy 0 <= min < max <= 1")
+    if args.hp_confirm_frames < 1:
+        raise ValueError("hp_confirm_frames must be >= 1")
+    if not (0.0 <= args.hp_smoothing_alpha <= 1.0):
+        raise ValueError("hp_smoothing_alpha must be in [0, 1]")
+    if args.ocr_confidence_decay_per_sec < 0:
+        raise ValueError("ocr_confidence_decay_per_sec must be >= 0")
+    if args.ocr_stale_timeout_sec < 0:
+        raise ValueError("ocr_stale_timeout_sec must be >= 0")
+
+
+def _smooth_ratio(prev: float | None, curr: float | None, alpha: float) -> float | None:
+    if curr is None:
+        return None
+    if prev is None:
+        return curr
+    return (alpha * curr) + ((1.0 - alpha) * prev)
+
+
+def _confirm_damage(
+    event,
+    streak: int,
+    pending: float,
+    confirm_frames: int,
+) -> tuple[float, int, float]:
+    if event.damage <= 0:
+        return 0.0, 0, 0.0
+
+    streak += 1
+    pending += event.damage
+    if streak >= confirm_frames:
+        return pending, confirm_frames, 0.0
+    return 0.0, streak, pending

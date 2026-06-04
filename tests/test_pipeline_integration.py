@@ -2,6 +2,7 @@ import csv
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from storm_surge_border.csvio import write_review_csv
 from storm_surge_border.models import CorrectionRow, VideoMeta
@@ -105,3 +106,49 @@ def test_pipeline_ocr_carry_confidence_decays(tmp_path: Path, monkeypatch) -> No
     assert call_count["n"] == 2
     assert "ocr-carry" in result.estimates[1].source_flags
     assert result.estimates[1].confidence < result.estimates[0].confidence
+
+
+def test_pipeline_ocr_stale_values_are_invalidated(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "storm_surge_border.pipeline.read_video_meta",
+        lambda _p: VideoMeta(width=1920, height=1080, fps=60.0, frame_count=25, duration_sec=0.41),
+    )
+    monkeypatch.setattr("storm_surge_border.pipeline.VideoFrameReader", _FakeVideoFrameReader)
+    monkeypatch.setattr("storm_surge_border.pipeline.write_plot_png", lambda _p, _r: None)
+    monkeypatch.setattr("storm_surge_border.pipeline._build_easyocr_reader", lambda: object())
+    monkeypatch.setattr(
+        "storm_surge_border.pipeline.read_surge_from_frame",
+        lambda _roi, _reader: SurgeOcrValue(
+            gap_value=120.0, is_above_border=True, confidence=1.0, raw_text="+120"
+        ),
+    )
+
+    args = PipelineArgs(
+        video_a="a.mp4",
+        video_b="b.mp4",
+        sample_interval=0.1,
+        ocr_interval=99.0,
+        ocr_stale_timeout_sec=0.15,
+        ocr_confidence_decay_per_sec=0.0,
+        out_csv=str(tmp_path / "out.csv"),
+        out_review_csv=str(tmp_path / "review.csv"),
+        corrections_csv=str(tmp_path / "review.csv"),
+        out_png=str(tmp_path / "out.png"),
+    )
+
+    result = run_pipeline(args)
+    assert result.estimates[0].surge_gap_value == 120.0
+    assert result.estimates[-1].surge_gap_value is None
+    assert any("ocr-stale-reset" in row.source_flags for row in result.estimates)
+
+
+def test_pipeline_args_validation_rejects_invalid_ranges() -> None:
+    with pytest.raises(ValueError):
+        run_pipeline(
+            PipelineArgs(
+                video_a="a.mp4",
+                video_b="b.mp4",
+                hp_min_drop_ratio=0.6,
+                hp_max_drop_ratio=0.4,
+            )
+        )

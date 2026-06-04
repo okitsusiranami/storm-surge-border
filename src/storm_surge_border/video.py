@@ -48,28 +48,6 @@ def read_video_meta(video_path: str) -> VideoMeta:
     )
 
 
-def read_frame_at(video_path: str, timestamp_sec: float) -> np.ndarray | None:
-    try:
-        import cv2
-    except ModuleNotFoundError as exc:
-        raise RuntimeError("opencv-python is required") from exc
-
-    path = Path(video_path)
-    if not path.exists():
-        raise FileNotFoundError(f"video not found: {video_path}")
-
-    cap = cv2.VideoCapture(str(path))
-    if not cap.isOpened():
-        raise RuntimeError(f"failed to open video: {video_path}")
-
-    cap.set(cv2.CAP_PROP_POS_MSEC, max(0.0, timestamp_sec) * 1000.0)
-    ok, frame = cap.read()
-    cap.release()
-    if not ok:
-        return None
-    return frame
-
-
 class VideoFrameReader:
     """Persistent video reader optimized for increasing timestamps."""
 
