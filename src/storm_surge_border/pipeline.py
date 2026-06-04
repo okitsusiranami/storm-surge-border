@@ -79,9 +79,8 @@ def run_pipeline(args: PipelineArgs) -> PipelineResult:
             frame_a = reader_a.read_at(ts)
             frame_b = reader_b.read_at(ts - args.offset_sec)
 
-            run_ocr = (
-                reader is not None
-                and (last_ocr_ts is None or (ts - last_ocr_ts) >= max(args.ocr_interval, 0.1))
+            run_ocr = reader is not None and (
+                last_ocr_ts is None or (ts - last_ocr_ts) >= args.ocr_interval
             )
             source_flags = []
 
