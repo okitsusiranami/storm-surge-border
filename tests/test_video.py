@@ -18,8 +18,6 @@ def test_timestamp_to_frame_index_unknown_frame_count_defaults_zero() -> None:
 
 
 def test_video_frame_reader_unknown_frame_count_uses_msec_seek(monkeypatch, tmp_path) -> None:
-    from storm_surge_border import video as video_mod
-
     class _FakeCap:
         def __init__(self) -> None:
             self.props = {
