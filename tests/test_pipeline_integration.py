@@ -5,9 +5,10 @@ import numpy as np
 import pytest
 
 from storm_surge_border.csvio import write_review_csv
+from storm_surge_border.hp import DamageEvent
 from storm_surge_border.models import CorrectionRow, VideoMeta
 from storm_surge_border.ocr import SurgeOcrValue
-from storm_surge_border.pipeline import PipelineArgs, run_pipeline
+from storm_surge_border.pipeline import PipelineArgs, _confirm_damage, run_pipeline
 
 
 class _FakeVideoFrameReader:
@@ -152,3 +153,23 @@ def test_pipeline_args_validation_rejects_invalid_ranges() -> None:
                 hp_max_drop_ratio=0.4,
             )
         )
+
+
+def test_confirm_damage_confirms_once_for_long_continuous_drop() -> None:
+    streak = 0
+    pending = 0.0
+    confirmed = False
+    added = []
+
+    for _ in range(4):
+        add, streak, pending, confirmed = _confirm_damage(
+            DamageEvent(damage=10.0, flag="hp-damaged"),
+            streak,
+            pending,
+            confirm_frames=2,
+            confirmed=confirmed,
+        )
+        added.append(add)
+
+    # Confirm once on 2nd frame, no repeated adds on 3rd+ continuous frames.
+    assert added == [0.0, 20.0, 0.0, 0.0]

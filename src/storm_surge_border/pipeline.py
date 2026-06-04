@@ -70,6 +70,8 @@ def run_pipeline(args: PipelineArgs) -> PipelineResult:
     streak_b = 0
     pending_a = 0.0
     pending_b = 0.0
+    confirmed_a = False
+    confirmed_b = False
     cumulative_received = 0.0
 
     with VideoFrameReader(args.video_a) as reader_a, VideoFrameReader(args.video_b) as reader_b:
@@ -106,17 +108,19 @@ def run_pipeline(args: PipelineArgs) -> PipelineResult:
                 min_drop_ratio=args.hp_min_drop_ratio,
                 max_drop_ratio=args.hp_max_drop_ratio,
             )
-            add_a, streak_a, pending_a = _confirm_damage(
+            add_a, streak_a, pending_a, confirmed_a = _confirm_damage(
                 dmg_a,
                 streak_a,
                 pending_a,
                 args.hp_confirm_frames,
+                confirmed_a,
             )
-            add_b, streak_b, pending_b = _confirm_damage(
+            add_b, streak_b, pending_b, confirmed_b = _confirm_damage(
                 dmg_b,
                 streak_b,
                 pending_b,
                 args.hp_confirm_frames,
+                confirmed_b,
             )
             cumulative_received += add_a + add_b
             source_flags.extend([dmg_a.flag, dmg_b.flag, "damage-source-duo"])
@@ -256,12 +260,16 @@ def _confirm_damage(
     streak: int,
     pending: float,
     confirm_frames: int,
-) -> tuple[float, int, float]:
+    confirmed: bool,
+) -> tuple[float, int, float, bool]:
     if event.damage <= 0:
-        return 0.0, 0, 0.0
+        return 0.0, 0, 0.0, False
+
+    if confirmed:
+        return 0.0, streak, pending, True
 
     streak += 1
     pending += event.damage
-    if streak >= confirm_frames:
-        return pending, confirm_frames, 0.0
-    return 0.0, streak, pending
+    if streak == confirm_frames:
+        return pending, streak, 0.0, True
+    return 0.0, streak, pending, False
