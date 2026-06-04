@@ -98,6 +98,23 @@ def build_parser() -> argparse.ArgumentParser:
         default=15.0,
         help="Timeout after which carried OCR values are invalidated",
     )
+    parser.add_argument(
+        "--ocr-min-confidence-for-border",
+        type=float,
+        default=0.4,
+        help="Minimum OCR confidence required to compute estimated_border",
+    )
+    parser.add_argument(
+        "--surge-source-video",
+        choices=["a", "b"],
+        default="a",
+        help="Video source used for surge OCR (a or b)",
+    )
+    parser.add_argument(
+        "--allow-missing-easyocr",
+        action="store_true",
+        help="Continue without OCR if easyocr is unavailable",
+    )
     return parser
 
 
@@ -122,6 +139,9 @@ def main() -> int:
         hp_smoothing_alpha=ns.hp_smoothing_alpha,
         ocr_confidence_decay_per_sec=ns.ocr_confidence_decay_per_sec,
         ocr_stale_timeout_sec=ns.ocr_stale_timeout_sec,
+        ocr_min_confidence_for_border=ns.ocr_min_confidence_for_border,
+        allow_missing_easyocr=ns.allow_missing_easyocr,
+        surge_source_video=ns.surge_source_video,
     )
     result = run_pipeline(args)
     print(f"done: estimates={len(result.estimates)} review_rows={len(result.review_rows)}")

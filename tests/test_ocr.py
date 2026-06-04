@@ -36,6 +36,28 @@ def test_extract_surge_no_number() -> None:
     assert res.is_above_border is True
 
 
+def test_extract_surge_conflicting_side_is_invalid() -> None:
+    res = extract_surge_from_ocr_results(
+        [
+            ([[0, 0], [1, 0], [1, 1], [0, 1]], "以上", 0.90),
+            ([[0, 0], [1, 0], [1, 1], [0, 1]], "-123", 0.80),
+        ]
+    )
+    assert res.gap_value is None
+    assert res.is_above_border is None
+
+
+def test_extract_surge_conflicting_numbers_is_invalid() -> None:
+    res = extract_surge_from_ocr_results(
+        [
+            ([[0, 0], [1, 0], [1, 1], [0, 1]], "+120", 0.90),
+            ([[0, 0], [1, 0], [1, 1], [0, 1]], "+130", 0.80),
+        ]
+    )
+    assert res.gap_value is None
+    assert res.is_above_border is None
+
+
 def test_read_surge_from_frame_with_none_reader_returns_empty() -> None:
     frame = np.zeros((10, 10, 3), dtype=np.uint8)
     res = read_surge_from_frame(frame, None)

@@ -16,10 +16,18 @@ python -m storm_surge_border \
 	--video-b path/to/duo_b.mp4 \
 	--offset-sec 0.0 \
 	--sample-interval 0.1 \
+	--surge-source-video a \
+	--ocr-min-confidence-for-border 0.4 \
 	--out-csv outputs/estimated_border.csv \
 	--out-review-csv outputs/review_candidates.csv \
 	--corrections-csv outputs/review_candidates.csv \
 	--out-png outputs/estimated_border.png
+```
+
+If `easyocr` is not installed and you still want to run HP-only flow, use:
+
+```bash
+python -m storm_surge_border ... --allow-missing-easyocr
 ```
 
 Current Stage-1 status:
@@ -29,6 +37,8 @@ Current Stage-1 status:
 - Reflects cumulative received damage as `duo_damage_diff` (current stage: dealt damage is not included yet).
 - Writes estimate CSV, review CSV for manual shaping, and border PNG.
 - Reads surge gap and side (above/below) from top-right OCR with carry-forward between OCR intervals.
+- Skips `estimated_border` computation when OCR confidence is below `--ocr-min-confidence-for-border`.
+- Marks carry-based border rows with `border-provisional-carry` in `source_flags`.
 
 ## Tests
 

@@ -33,7 +33,7 @@ def test_pipeline_without_easyocr_and_with_corrections_regenerates_review_rows(
         lambda _p: VideoMeta(width=1920, height=1080, fps=60.0, frame_count=7, duration_sec=0.11),
     )
     monkeypatch.setattr("storm_surge_border.pipeline.VideoFrameReader", _FakeVideoFrameReader)
-    monkeypatch.setattr("storm_surge_border.pipeline._build_easyocr_reader", lambda: None)
+    monkeypatch.setattr("storm_surge_border.pipeline._build_easyocr_reader", lambda **_kw: None)
     monkeypatch.setattr("storm_surge_border.pipeline.write_plot_png", lambda _p, _r: None)
 
     corrections_csv = tmp_path / "corrections.csv"
@@ -86,7 +86,7 @@ def test_pipeline_ocr_carry_confidence_decays(tmp_path: Path, monkeypatch) -> No
         call_count["n"] += 1
         return SurgeOcrValue(gap_value=100.0, is_above_border=True, confidence=1.0, raw_text="+100")
 
-    monkeypatch.setattr("storm_surge_border.pipeline._build_easyocr_reader", lambda: object())
+    monkeypatch.setattr("storm_surge_border.pipeline._build_easyocr_reader", lambda **_kw: object())
     monkeypatch.setattr("storm_surge_border.pipeline.read_surge_from_frame", _fake_read_surge)
 
     args = PipelineArgs(
@@ -106,7 +106,44 @@ def test_pipeline_ocr_carry_confidence_decays(tmp_path: Path, monkeypatch) -> No
     assert len(result.estimates) >= 3
     assert call_count["n"] == 2
     assert "ocr-carry" in result.estimates[1].source_flags
+    assert "border-provisional-carry" in result.estimates[1].source_flags
     assert result.estimates[1].confidence < result.estimates[0].confidence
+
+
+def test_pipeline_skips_border_when_ocr_confidence_too_low(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "storm_surge_border.pipeline.read_video_meta",
+        lambda _p: VideoMeta(width=1920, height=1080, fps=60.0, frame_count=10, duration_sec=0.21),
+    )
+    monkeypatch.setattr("storm_surge_border.pipeline.VideoFrameReader", _FakeVideoFrameReader)
+    monkeypatch.setattr("storm_surge_border.pipeline.write_plot_png", lambda _p, _r: None)
+    monkeypatch.setattr("storm_surge_border.pipeline._build_easyocr_reader", lambda **_kw: object())
+    monkeypatch.setattr(
+        "storm_surge_border.pipeline.read_surge_from_frame",
+        lambda _roi, _reader: SurgeOcrValue(
+            gap_value=100.0,
+            is_above_border=True,
+            confidence=0.2,
+            raw_text="+100",
+        ),
+    )
+
+    args = PipelineArgs(
+        video_a="a.mp4",
+        video_b="b.mp4",
+        sample_interval=0.1,
+        ocr_interval=0.1,
+        ocr_confidence_decay_per_sec=0.0,
+        ocr_min_confidence_for_border=0.8,
+        out_csv=str(tmp_path / "out.csv"),
+        out_review_csv=str(tmp_path / "review.csv"),
+        corrections_csv=str(tmp_path / "review.csv"),
+        out_png=str(tmp_path / "out.png"),
+    )
+
+    result = run_pipeline(args)
+    assert all(row.estimated_border is None for row in result.estimates)
+    assert any("ocr-low-confidence-skip-border" in row.source_flags for row in result.estimates)
 
 
 def test_pipeline_ocr_stale_values_are_invalidated(tmp_path: Path, monkeypatch) -> None:
@@ -116,7 +153,7 @@ def test_pipeline_ocr_stale_values_are_invalidated(tmp_path: Path, monkeypatch) 
     )
     monkeypatch.setattr("storm_surge_border.pipeline.VideoFrameReader", _FakeVideoFrameReader)
     monkeypatch.setattr("storm_surge_border.pipeline.write_plot_png", lambda _p, _r: None)
-    monkeypatch.setattr("storm_surge_border.pipeline._build_easyocr_reader", lambda: object())
+    monkeypatch.setattr("storm_surge_border.pipeline._build_easyocr_reader", lambda **_kw: object())
     monkeypatch.setattr(
         "storm_surge_border.pipeline.read_surge_from_frame",
         lambda _roi, _reader: SurgeOcrValue(
@@ -172,8 +209,8 @@ def test_hp_damage_tracker_confirms_once_for_long_continuous_drop(monkeypatch) -
         add, _flags = tracker.update(r)
         adds.append(add)
 
-    # At most one confirmation in one continuous sequence.
-    assert sum(1 for x in adds if x > 0) == 1
+    # Long sequences are confirmed repeatedly by confirmation windows.
+    assert sum(1 for x in adds if x > 0) == 2
 
 
 def test_hp_damage_tracker_allows_new_sequence_after_non_drop() -> None:
@@ -190,5 +227,5 @@ def test_hp_damage_tracker_allows_new_sequence_after_non_drop() -> None:
         add, _flags = tracker.update(r)
         adds.append(add)
 
-    # Two separate drop sequences should allow two confirmations.
+    # Two separate drop sequences should still allow confirmations.
     assert sum(1 for x in adds if x > 0) == 2

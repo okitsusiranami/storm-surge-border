@@ -4,4 +4,12 @@
 - 差異内容: [状態管理・OCR・HP推定・集計・出力前整形が単一モジュールに集中している]
 - 影響: [変更時の影響範囲が広く、回帰リスクとレビュー負荷が高い]
 - 対応案: [state tracker, ocr coordinator, hp damage tracker, timeline assembler へ段階的に分割]
-- 状態: [open]
+- 状態: [resolved]
+
+- 日付: [2026-06-04]
+- タイトル: [carry OCR の低信頼利用を抑制する]
+- 関連ファイル: [src/storm_surge_border/pipeline.py]
+- 差異内容: [carry値が低信頼でも境界推定に使われる]
+- 影響: [誤OCRが静かに推定値へ残留する]
+- 対応案: [confidence gate と provisional flag を導入する]
+- 状態: [resolved]

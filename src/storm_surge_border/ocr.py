@@ -35,8 +35,7 @@ def extract_surge_from_ocr_results(results: list[tuple]) -> SurgeOcrValue:
     if not joined:
         return SurgeOcrValue(None, None, 0.0, "")
 
-    number = _extract_number(joined)
-    side = _extract_side(joined)
+    number, side = _extract_consistent_number_and_side(joined)
     confidence = (sum(confs) / len(confs)) if confs else 0.0
     return SurgeOcrValue(number, side, confidence, joined)
 
@@ -63,20 +62,51 @@ def read_surge_from_frame(
     return extract_surge_from_ocr_results(results)
 
 
-def _extract_number(text: str) -> float | None:
-    m = re.search(r"[-+]?\d+", text)
-    if not m:
-        return None
-    return float(abs(int(m.group(0))))
+def _extract_consistent_number_and_side(text: str) -> tuple[float | None, bool | None]:
+    number, side_from_number, has_number_conflict = _extract_number_and_side_from_tokens(text)
+    side_from_words, has_word_conflict = _extract_side_from_words(text)
+
+    if has_number_conflict or has_word_conflict:
+        return None, None
+
+    if side_from_words is not None and side_from_number is not None:
+        if side_from_words != side_from_number:
+            return None, None
+
+    side = side_from_words if side_from_words is not None else side_from_number
+    return number, side
 
 
-def _extract_side(text: str) -> bool | None:
-    if "以上" in text:
-        return True
-    if "以下" in text:
-        return False
-    if "+" in text:
-        return True
-    if "-" in text:
-        return False
-    return None
+def _extract_number_and_side_from_tokens(text: str) -> tuple[float | None, bool | None, bool]:
+    matches = re.findall(r"([+-]?)(\d+)", text)
+    if not matches:
+        return None, None, False
+
+    values = [int(num) for _sign, num in matches]
+    abs_values = {abs(v) for v in values}
+    if len(abs_values) != 1:
+        return None, None, True
+
+    explicit_signs = {sign for sign, _num in matches if sign in {"+", "-"}}
+    if len(explicit_signs) > 1:
+        return None, None, True
+
+    side_from_number: bool | None = None
+    if explicit_signs == {"+"}:
+        side_from_number = True
+    elif explicit_signs == {"-"}:
+        side_from_number = False
+
+    return float(next(iter(abs_values))), side_from_number, False
+
+
+def _extract_side_from_words(text: str) -> tuple[bool | None, bool]:
+    has_above = "以上" in text
+    has_below = "以下" in text
+    if has_above and has_below:
+        return None, True
+    if has_above:
+        return True, False
+    if has_below:
+        return False, False
+    return None, False

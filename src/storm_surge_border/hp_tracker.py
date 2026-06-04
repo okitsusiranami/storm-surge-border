@@ -7,6 +7,14 @@ from .hp import detect_received_damage
 
 @dataclass
 class HpDamageTracker:
+    """Track HP-bar drop events with debounce-style confirmation windows.
+
+    Stage-1 heuristic: each contiguous drop sequence is split into windows of
+    ``confirm_frames``. When a window closes, the accumulated pending damage is
+    emitted. This keeps noise rejection while allowing long continuous drops to
+    continue contributing instead of being counted only once.
+    """
+
     max_pool: float
     min_drop_ratio: float
     max_drop_ratio: float
@@ -16,7 +24,6 @@ class HpDamageTracker:
     _prev_smoothed_ratio: float | None = None
     _streak: int = 0
     _pending: float = 0.0
-    _confirmed_in_sequence: bool = False
 
     def update(self, current_raw_ratio: float | None) -> tuple[float, list[str]]:
         smoothed = self._smooth(current_raw_ratio)
@@ -31,7 +38,7 @@ class HpDamageTracker:
         if smoothed is not None:
             self._prev_smoothed_ratio = smoothed
 
-        add = self._confirm_once(event.damage)
+        add = self._confirm_windowed(event.damage)
         flags = [event.flag]
         if add > 0:
             flags.append("hp-confirmed")
@@ -52,21 +59,17 @@ class HpDamageTracker:
         self._prev_raw_ratio = current_raw_ratio
         return smoothed
 
-    def _confirm_once(self, damage: float) -> float:
+    def _confirm_windowed(self, damage: float) -> float:
         if damage <= 0:
             self._streak = 0
             self._pending = 0.0
-            self._confirmed_in_sequence = False
-            return 0.0
-
-        if self._confirmed_in_sequence:
             return 0.0
 
         self._streak += 1
         self._pending += damage
-        if self._streak == self.confirm_frames:
+        if self._streak >= self.confirm_frames:
             out = self._pending
             self._pending = 0.0
-            self._confirmed_in_sequence = True
+            self._streak = 0
             return out
         return 0.0
