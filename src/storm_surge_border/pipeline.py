@@ -30,6 +30,10 @@ class PipelineArgs:
     corrections_csv: str = "outputs/review_candidates.csv"
     out_png: str = "outputs/estimated_border.png"
     ocr_interval: float = 1.0
+    hp_max_pool: float = 200.0
+    hp_min_drop_ratio: float = 0.005
+    hp_max_drop_ratio: float = 0.45
+    ocr_confidence_decay_per_sec: float = 0.03
 
 
 def run_pipeline(args: PipelineArgs) -> PipelineResult:
@@ -73,8 +77,20 @@ def run_pipeline(args: PipelineArgs) -> PipelineResult:
             hp_ratio_a = estimate_hp_ratio_from_roi(hp_roi_a)
             hp_ratio_b = estimate_hp_ratio_from_roi(hp_roi_b)
 
-            dmg_a = detect_received_damage(prev_hp_a, hp_ratio_a)
-            dmg_b = detect_received_damage(prev_hp_b, hp_ratio_b)
+            dmg_a = detect_received_damage(
+                prev_hp_a,
+                hp_ratio_a,
+                max_pool=args.hp_max_pool,
+                min_drop_ratio=args.hp_min_drop_ratio,
+                max_drop_ratio=args.hp_max_drop_ratio,
+            )
+            dmg_b = detect_received_damage(
+                prev_hp_b,
+                hp_ratio_b,
+                max_pool=args.hp_max_pool,
+                min_drop_ratio=args.hp_min_drop_ratio,
+                max_drop_ratio=args.hp_max_drop_ratio,
+            )
             cumulative_received += dmg_a.damage + dmg_b.damage
             source_flags.extend([dmg_a.flag, dmg_b.flag])
 
@@ -98,8 +114,17 @@ def run_pipeline(args: PipelineArgs) -> PipelineResult:
                     source_flags.append("missing-ocr-side")
                 last_conf = ocr_value.confidence
                 last_ocr_ts = ts
+                frame_confidence = last_conf
             else:
                 source_flags.append("ocr-carry")
+                frame_confidence = _decay_carry_confidence(
+                    base_confidence=last_conf,
+                    last_ocr_ts=last_ocr_ts,
+                    current_ts=ts,
+                    decay_per_sec=args.ocr_confidence_decay_per_sec,
+                )
+                if frame_confidence < last_conf:
+                    source_flags.append("ocr-conf-decay")
 
             # Stage-1 now estimates duo damage diff from cumulative received damage.
             duo_damage_diff = -cumulative_received
@@ -118,7 +143,7 @@ def run_pipeline(args: PipelineArgs) -> PipelineResult:
                     surge_gap_value=last_gap_value,
                     is_above_border=last_side,
                     estimated_border=estimated_border,
-                    confidence=last_conf,
+                    confidence=frame_confidence,
                     source_flags="|".join(source_flags),
                 )
             )
@@ -128,6 +153,7 @@ def run_pipeline(args: PipelineArgs) -> PipelineResult:
     user_corrections = read_review_csv(args.corrections_csv)
     if user_corrections:
         estimates = apply_corrections(estimates, user_corrections)
+        review_rows = build_review_rows(estimates, args.confidence_threshold)
 
     write_estimates_csv(args.out_csv, estimates)
     write_review_csv(args.out_review_csv, review_rows)
@@ -148,3 +174,17 @@ def _crop(frame, rect: tuple[int, int, int, int]):
         return None
     x1, y1, x2, y2 = rect
     return frame[y1:y2, x1:x2]
+
+
+def _decay_carry_confidence(
+    *,
+    base_confidence: float,
+    last_ocr_ts: float | None,
+    current_ts: float,
+    decay_per_sec: float,
+) -> float:
+    if last_ocr_ts is None:
+        return 0.0
+    elapsed = max(0.0, current_ts - last_ocr_ts)
+    decayed = base_confidence - (elapsed * max(0.0, decay_per_sec))
+    return max(0.0, decayed)

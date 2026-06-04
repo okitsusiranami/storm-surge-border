@@ -22,3 +22,12 @@ def test_detect_received_damage_outlier_drop_is_ignored() -> None:
     event = detect_received_damage(prev_ratio=0.90, curr_ratio=0.10)
     assert event.damage == 0.0
     assert event.flag == "hp-drop-outlier"
+
+
+def test_estimate_hp_ratio_ignores_single_right_noise() -> None:
+    roi = np.zeros((40, 200, 3), dtype=np.uint8)
+    roi[:, :100] = (0, 255, 0)
+    roi[:, 199] = (0, 255, 0)
+    ratio = estimate_hp_ratio_from_roi(roi)
+    assert ratio is not None
+    assert 0.40 <= ratio <= 0.60

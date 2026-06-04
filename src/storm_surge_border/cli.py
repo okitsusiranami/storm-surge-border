@@ -56,6 +56,30 @@ def build_parser() -> argparse.ArgumentParser:
         default=1.0,
         help="OCR execution interval in seconds",
     )
+    parser.add_argument(
+        "--hp-max-pool",
+        type=float,
+        default=200.0,
+        help="Maximum HP+shield pool used for received damage estimation",
+    )
+    parser.add_argument(
+        "--hp-min-drop-ratio",
+        type=float,
+        default=0.005,
+        help="Minimum ratio drop to count as damage",
+    )
+    parser.add_argument(
+        "--hp-max-drop-ratio",
+        type=float,
+        default=0.45,
+        help="Maximum ratio drop before treating as outlier",
+    )
+    parser.add_argument(
+        "--ocr-confidence-decay-per-sec",
+        type=float,
+        default=0.03,
+        help="Confidence decay applied per second while OCR value is carried forward",
+    )
     return parser
 
 
@@ -73,6 +97,10 @@ def main() -> int:
         corrections_csv=ns.corrections_csv,
         out_png=ns.out_png,
         ocr_interval=ns.ocr_interval,
+        hp_max_pool=ns.hp_max_pool,
+        hp_min_drop_ratio=ns.hp_min_drop_ratio,
+        hp_max_drop_ratio=ns.hp_max_drop_ratio,
+        ocr_confidence_decay_per_sec=ns.ocr_confidence_decay_per_sec,
     )
     result = run_pipeline(args)
     print(f"done: estimates={len(result.estimates)} review_rows={len(result.review_rows)}")
