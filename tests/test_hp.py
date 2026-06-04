@@ -31,3 +31,13 @@ def test_estimate_hp_ratio_ignores_single_right_noise() -> None:
     ratio = estimate_hp_ratio_from_roi(roi)
     assert ratio is not None
     assert 0.40 <= ratio <= 0.60
+
+
+def test_estimate_hp_ratio_uses_inclusive_filled_width() -> None:
+    roi = np.zeros((20, 10, 3), dtype=np.uint8)
+    roi[:, 0] = (0, 255, 0)
+    ratio = estimate_hp_ratio_from_roi(roi)
+    assert ratio is not None
+    # With smoothing, the detected width can broaden, but should stay positive
+    # and well below a half-filled bar for this one-column input.
+    assert 0.1 <= ratio < 0.5

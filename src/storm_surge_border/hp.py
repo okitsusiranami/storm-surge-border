@@ -58,8 +58,9 @@ def estimate_hp_ratio_from_roi(roi) -> float | None:
     if best_len < max(4, int(w * 0.04)):
         return None
 
-    fill_end = best_start + best_len - 1
-    ratio = max(0.0, min(1.0, fill_end / max(1, w - 1)))
+    # Use inclusive filled width to avoid off-by-one underestimation.
+    filled_width = best_start + best_len
+    ratio = max(0.0, min(1.0, filled_width / max(1, w)))
     return float(ratio)
 
 
