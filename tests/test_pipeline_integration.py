@@ -107,6 +107,7 @@ def test_pipeline_ocr_carry_confidence_decays(tmp_path: Path, monkeypatch) -> No
     assert call_count["n"] == 2
     assert "ocr-carry" in result.estimates[1].source_flags
     assert "border-provisional-carry" in result.estimates[1].source_flags
+    assert result.estimates[1].estimated_border_status == "provisional-carry"
     assert result.estimates[1].confidence < result.estimates[0].confidence
 
 
@@ -144,6 +145,51 @@ def test_pipeline_skips_border_when_ocr_confidence_too_low(tmp_path: Path, monke
     result = run_pipeline(args)
     assert all(row.estimated_border is None for row in result.estimates)
     assert any("ocr-low-confidence-skip-border" in row.source_flags for row in result.estimates)
+    assert all(row.estimated_border_status == "low-ocr-confidence" for row in result.estimates)
+
+
+def test_pipeline_missing_easyocr_sets_explicit_status(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "storm_surge_border.pipeline.read_video_meta",
+        lambda _p: VideoMeta(width=1920, height=1080, fps=60.0, frame_count=7, duration_sec=0.11),
+    )
+    monkeypatch.setattr("storm_surge_border.pipeline.VideoFrameReader", _FakeVideoFrameReader)
+    monkeypatch.setattr("storm_surge_border.pipeline._build_easyocr_reader", lambda **_kw: None)
+    monkeypatch.setattr("storm_surge_border.pipeline.write_plot_png", lambda _p, _r: None)
+
+    args = PipelineArgs(
+        video_a="a.mp4",
+        video_b="b.mp4",
+        allow_missing_easyocr=True,
+        out_csv=str(tmp_path / "out.csv"),
+        out_review_csv=str(tmp_path / "review.csv"),
+        corrections_csv=str(tmp_path / "review.csv"),
+        out_png=str(tmp_path / "out.png"),
+    )
+
+    result = run_pipeline(args)
+    assert all(row.estimated_border is None for row in result.estimates)
+    assert all(row.estimated_border_status == "missing-easyocr" for row in result.estimates)
+
+
+def test_hp_damage_tracker_emits_provisional_for_short_sequence() -> None:
+    tracker = HpDamageTracker(
+        max_pool=100.0,
+        min_drop_ratio=0.001,
+        max_drop_ratio=0.9,
+        confirm_frames=3,
+        smoothing_alpha=1.0,
+    )
+
+    adds = []
+    flags = []
+    for r in [1.0, 0.9, 0.9]:
+        add, f = tracker.update(r)
+        adds.append(add)
+        flags.extend(f)
+
+    assert adds[-1] > 0
+    assert "hp-provisional" in flags
 
 
 def test_pipeline_ocr_stale_values_are_invalidated(tmp_path: Path, monkeypatch) -> None:

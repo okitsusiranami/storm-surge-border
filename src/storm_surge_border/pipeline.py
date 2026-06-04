@@ -224,19 +224,28 @@ def assemble_estimate_row(
     # Stage-1 currently uses duo received-damage only for diff.
     duo_damage_diff = -cumulative_received
     estimated_border = None
+    estimated_border_status = "surge-unavailable"
 
     if surge_gap_value is not None and is_above_border is not None:
         source_flags.append(f"surge-source-{surge_source_video}")
         if frame_confidence < ocr_min_confidence_for_border:
             source_flags.append("ocr-low-confidence-skip-border")
+            estimated_border_status = "low-ocr-confidence"
         else:
             if "ocr-carry" in source_flags:
                 source_flags.append("border-provisional-carry")
+                estimated_border_status = "provisional-carry"
+            else:
+                estimated_border_status = "ok"
             estimated_border = calculate_estimated_border(
                 duo_damage_diff=duo_damage_diff,
                 surge_gap_value=surge_gap_value,
                 is_above_border=is_above_border,
             )
+    else:
+        estimated_border_status = _missing_border_status(source_flags)
+
+    normalized_flags = _normalize_source_flags(source_flags)
 
     return EstimateRow(
         timestamp_sec=timestamp_sec,
@@ -245,7 +254,8 @@ def assemble_estimate_row(
         is_above_border=is_above_border,
         estimated_border=estimated_border,
         confidence=frame_confidence,
-        source_flags="|".join(source_flags),
+        estimated_border_status=estimated_border_status,
+        source_flags="|".join(normalized_flags),
     )
 
 
@@ -299,18 +309,51 @@ def _crop(frame, rect: tuple[int, int, int, int]):
     return frame[y1:y2, x1:x2]
 
 
-def _decay_carry_confidence(
-    *,
-    base_confidence: float,
-    last_ocr_ts: float | None,
-    current_ts: float,
-    decay_per_sec: float,
-) -> float:
-    if last_ocr_ts is None:
-        return 0.0
-    elapsed = max(0.0, current_ts - last_ocr_ts)
-    decayed = base_confidence - (elapsed * max(0.0, decay_per_sec))
-    return max(0.0, decayed)
+def _missing_border_status(source_flags: list[str]) -> str:
+    if "missing-easyocr" in source_flags:
+        return "missing-easyocr"
+    if "ocr-stale-reset" in source_flags:
+        return "ocr-stale"
+    if "ocr-partial-invalid" in source_flags:
+        return "ocr-partial-invalid"
+    if "ocr-missing" in source_flags:
+        return "ocr-missing"
+    if "ocr-no-valid" in source_flags:
+        return "ocr-no-valid"
+    return "surge-unavailable"
+
+
+def _normalize_source_flags(source_flags: list[str]) -> list[str]:
+    deduped = _dedupe_keep_order(source_flags)
+    deduped = _keep_one(deduped, ["ocr-direct", "ocr-carry", "ocr-no-valid", "ocr-stale-reset"])
+    deduped = _keep_one(deduped, ["ocr-valid-pair", "ocr-partial-invalid", "ocr-missing"])
+    deduped = _keep_one(deduped, ["hp-confirmed", "hp-provisional"])
+    return deduped
+
+
+def _dedupe_keep_order(values: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out
+
+
+def _keep_one(values: list[str], priority: list[str]) -> list[str]:
+    present = [p for p in priority if p in values]
+    if len(present) <= 1:
+        return values
+
+    keep = present[0]
+    out: list[str] = []
+    for v in values:
+        if v in priority and v != keep:
+            continue
+        out.append(v)
+    return out
 
 
 def _validate_args(args: PipelineArgs) -> None:

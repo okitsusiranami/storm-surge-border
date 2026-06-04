@@ -39,6 +39,8 @@ Current Stage-1 status:
 - Reads surge gap and side (above/below) from top-right OCR with carry-forward between OCR intervals.
 - Skips `estimated_border` computation when OCR confidence is below `--ocr-min-confidence-for-border`.
 - Marks carry-based border rows with `border-provisional-carry` in `source_flags`.
+- Adds `estimated_border_status` column to explain why border is computed/skipped.
+- Emits `hp-provisional` when a short damage sequence ends before `--hp-confirm-frames`.
 
 ## Tests
 
