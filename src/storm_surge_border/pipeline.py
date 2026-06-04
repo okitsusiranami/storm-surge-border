@@ -167,6 +167,7 @@ def run_pipeline(args: PipelineArgs) -> PipelineResult:
                 last_gap_value = None
                 last_side = None
                 last_conf = 0.0
+                frame_confidence = 0.0
             # Stage-1 combines duo-received-damage with surge text read from video A.
             duo_damage_diff = -cumulative_received
             estimated_border = None
@@ -270,7 +271,8 @@ def _confirm_damage(
         return 0.0, 0, 0.0, False
 
     if confirmed:
-        return 0.0, streak, pending, True
+        # Keep blocking re-add during one continuous drop sequence.
+        return 0.0, max(streak, confirm_frames), 0.0, True
 
     streak += 1
     pending += event.damage

@@ -140,6 +140,7 @@ def test_pipeline_ocr_stale_values_are_invalidated(tmp_path: Path, monkeypatch) 
     result = run_pipeline(args)
     assert result.estimates[0].surge_gap_value == 120.0
     assert result.estimates[-1].surge_gap_value is None
+    assert result.estimates[-1].confidence == 0.0
     assert any("ocr-stale-reset" in row.source_flags for row in result.estimates)
 
 
@@ -173,3 +174,53 @@ def test_confirm_damage_confirms_once_for_long_continuous_drop() -> None:
 
     # Confirm once on 2nd frame, no repeated adds on 3rd+ continuous frames.
     assert added == [0.0, 20.0, 0.0, 0.0]
+
+
+def test_confirm_damage_allows_new_sequence_after_reset() -> None:
+    streak = 0
+    pending = 0.0
+    confirmed = False
+
+    # First sequence confirms once.
+    _add1, streak, pending, confirmed = _confirm_damage(
+        DamageEvent(damage=10.0, flag="hp-damaged"),
+        streak,
+        pending,
+        confirm_frames=2,
+        confirmed=confirmed,
+    )
+    add2, streak, pending, confirmed = _confirm_damage(
+        DamageEvent(damage=10.0, flag="hp-damaged"),
+        streak,
+        pending,
+        confirm_frames=2,
+        confirmed=confirmed,
+    )
+    assert add2 == 20.0
+
+    # No-drop frame resets confirmation state.
+    add3, streak, pending, confirmed = _confirm_damage(
+        DamageEvent(damage=0.0, flag="hp-no-drop"),
+        streak,
+        pending,
+        confirm_frames=2,
+        confirmed=confirmed,
+    )
+    assert (add3, streak, pending, confirmed) == (0.0, 0, 0.0, False)
+
+    # New sequence can confirm again.
+    _add4, streak, pending, confirmed = _confirm_damage(
+        DamageEvent(damage=8.0, flag="hp-damaged"),
+        streak,
+        pending,
+        confirm_frames=2,
+        confirmed=confirmed,
+    )
+    add5, streak, pending, confirmed = _confirm_damage(
+        DamageEvent(damage=8.0, flag="hp-damaged"),
+        streak,
+        pending,
+        confirm_frames=2,
+        confirmed=confirmed,
+    )
+    assert add5 == 16.0

@@ -69,6 +69,7 @@ class VideoFrameReader:
 
         self.fps = float(self.cap.get(cv2.CAP_PROP_FPS) or 0.0)
         self.frame_count = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        self.has_known_frame_count = self.frame_count > 0
         if self.fps <= 0.0:
             self.cap.release()
             raise RuntimeError(f"invalid fps in video: {video_path}")
@@ -85,6 +86,14 @@ class VideoFrameReader:
             self.cap.release()
 
     def read_at(self, timestamp_sec: float) -> np.ndarray | None:
+        if not self.has_known_frame_count:
+            # Backend may not expose frame count for some codecs/containers.
+            self.cap.set(self._cv2.CAP_PROP_POS_MSEC, max(0.0, timestamp_sec) * 1000.0)
+            ok, frame = self.cap.read()
+            if not ok:
+                return None
+            return frame
+
         target = timestamp_to_frame_index(timestamp_sec, self.fps, self.frame_count)
         if target < self._next_index:
             self.cap.set(self._cv2.CAP_PROP_POS_FRAMES, target)
