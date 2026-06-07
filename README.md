@@ -24,6 +24,8 @@ python -m storm_surge_border \
 	--out-png outputs/estimated_border.png
 ```
 
+`--out-review-csv` is the review-target CSV generated from low-confidence rows, and `--corrections-csv` is the file a reviewer edits and feeds back into the pipeline. During the roundtrip workflow, both can point to the same path.
+
 If `easyocr` is not installed and you still want to run HP-only flow, use:
 
 ```bash
@@ -36,6 +38,7 @@ Current Stage-1 status:
 - Estimates received damage from central-bottom HP bar changes on both videos.
 - Reflects cumulative received damage as `duo_damage_diff` (current stage: dealt damage is not included yet).
 - Writes estimate CSV, review CSV for manual shaping, and border PNG.
+- Supports review CSV roundtrip so manual corrections can be written back and reapplied.
 - Reads surge gap and side (above/below) from top-right OCR with carry-forward between OCR intervals.
 - Skips `estimated_border` computation when OCR confidence is below `--ocr-min-confidence-for-border`.
 - Marks carry-based border rows with `border-provisional-carry` in `source_flags`.
