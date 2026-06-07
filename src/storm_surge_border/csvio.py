@@ -77,9 +77,13 @@ def read_review_csv(file_path: str) -> list[CorrectionRow]:
         for line in reader:
             if not line.get("timestamp_sec") or not line.get("field_name"):
                 continue
+            try:
+                timestamp_sec = float(line["timestamp_sec"])
+            except ValueError:
+                continue
             rows.append(
                 CorrectionRow(
-                    timestamp_sec=float(line["timestamp_sec"]),
+                    timestamp_sec=timestamp_sec,
                     field_name=line["field_name"],
                     original_value=line.get("original_value") or None,
                     corrected_value=line.get("corrected_value") or None,

@@ -10,6 +10,25 @@ from storm_surge_border.models import CorrectionRow, VideoMeta
 from storm_surge_border.ocr import SurgeOcrValue
 from storm_surge_border.pipeline import PipelineArgs, run_pipeline
 
+# ---------------------------------------------------------------------------
+# Mock scope notice
+# ---------------------------------------------------------------------------
+# These tests cover the *pipeline orchestration* layer: argument validation,
+# correction application, re-computation of estimated_border, review-row
+# generation, and OCR state management.
+#
+# The following are replaced with lightweight fakes to keep tests fast and
+# deterministic without real video files or GPU:
+#   - read_video_meta        → fixed VideoMeta
+#   - VideoFrameReader       → returns a black frame (numpy zeros)
+#   - _build_easyocr_reader  → returns None or a sentinel object()
+#   - read_surge_from_frame  → returns a fixed SurgeOcrValue where needed
+#   - write_plot_png         → no-op
+#
+# Real I/O (CSV write/read via tmp_path) and the full correction/recompute
+# logic in core.py are exercised without mocking.
+# ---------------------------------------------------------------------------
+
 
 class _FakeVideoFrameReader:
     def __init__(self, _video_path: str) -> None:
