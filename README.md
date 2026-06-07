@@ -24,7 +24,7 @@ python -m storm_surge_border \
 	--out-png outputs/estimated_border.png
 ```
 
-`--out-review-csv` is the review-target CSV generated from low-confidence rows, and `--corrections-csv` is the file a reviewer edits and feeds back into the pipeline. During the roundtrip workflow, both can point to the same path.
+`--out-review-csv` is the review-target CSV generated from rows where confidence falls below `--confidence-threshold` or any required field (`duo_damage_diff`, `surge_gap_value`, `is_above_border`, `estimated_border`) is missing. `--corrections-csv` is the file a reviewer edits and feeds back into the pipeline. During the roundtrip workflow, both can point to the same path.
 
 If `easyocr` is not installed and you still want to run HP-only flow, use:
 
