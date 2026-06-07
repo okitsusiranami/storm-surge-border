@@ -10,6 +10,25 @@ from storm_surge_border.models import CorrectionRow, VideoMeta
 from storm_surge_border.ocr import SurgeOcrValue
 from storm_surge_border.pipeline import PipelineArgs, run_pipeline
 
+# ---------------------------------------------------------------------------
+# Mock scope notice
+# ---------------------------------------------------------------------------
+# These tests cover the *pipeline orchestration* layer: argument validation,
+# correction application, re-computation of estimated_border, review-row
+# generation, and OCR state management.
+#
+# The following are replaced with lightweight fakes to keep tests fast and
+# deterministic without real video files or GPU:
+#   - read_video_meta        → fixed VideoMeta
+#   - VideoFrameReader       → returns a black frame (numpy zeros)
+#   - _build_easyocr_reader  → returns None or a sentinel object()
+#   - read_surge_from_frame  → returns a fixed SurgeOcrValue where needed
+#   - write_plot_png         → no-op
+#
+# Real I/O (CSV write/read via tmp_path) and the full correction/recompute
+# logic in core.py are exercised without mocking.
+# ---------------------------------------------------------------------------
+
 
 class _FakeVideoFrameReader:
     def __init__(self, _video_path: str) -> None:
@@ -70,6 +89,137 @@ def test_pipeline_without_easyocr_and_with_corrections_regenerates_review_rows(
     with out_review_csv.open("r", encoding="utf-8", newline="") as f:
         rows = list(csv.reader(f))
     assert len(rows) == 2
+
+
+def test_pipeline_partial_correction_recomputes_estimated_border(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        "storm_surge_border.pipeline.read_video_meta",
+        lambda _p: VideoMeta(width=1920, height=1080, fps=60.0, frame_count=7, duration_sec=0.11),
+    )
+    monkeypatch.setattr("storm_surge_border.pipeline.VideoFrameReader", _FakeVideoFrameReader)
+    monkeypatch.setattr("storm_surge_border.pipeline._build_easyocr_reader", lambda **_kw: object())
+    monkeypatch.setattr("storm_surge_border.pipeline.write_plot_png", lambda _p, _r: None)
+    monkeypatch.setattr(
+        "storm_surge_border.pipeline.read_surge_from_frame",
+        lambda _roi, _reader: SurgeOcrValue(
+            gap_value=100.0,
+            is_above_border=True,
+            confidence=1.0,
+            raw_text="+100",
+        ),
+    )
+
+    corrections_csv = tmp_path / "corrections.csv"
+    write_review_csv(
+        str(corrections_csv),
+        [CorrectionRow(0.0, "duo_damage_diff", None, "500", "manual", "reviewer")],
+    )
+
+    args = PipelineArgs(
+        video_a="a.mp4",
+        video_b="b.mp4",
+        sample_interval=0.1,
+        ocr_interval=0.1,
+        out_csv=str(tmp_path / "out.csv"),
+        out_review_csv=str(tmp_path / "review.csv"),
+        corrections_csv=str(corrections_csv),
+        out_png=str(tmp_path / "out.png"),
+    )
+
+    result = run_pipeline(args)
+
+    assert result.estimates[0].duo_damage_diff == 500.0
+    assert result.estimates[0].estimated_border == 400.0
+    assert "manual-correction" in result.estimates[0].source_flags
+    assert result.review_rows == []
+
+
+def _make_ocr_pipeline_args(tmp_path: Path, *, duration_sec: float, frame_count: int, **overrides) -> PipelineArgs:
+    defaults = dict(
+        video_a="a.mp4",
+        video_b="b.mp4",
+        sample_interval=0.1,
+        ocr_interval=0.1,
+        out_csv=str(tmp_path / "out.csv"),
+        out_review_csv=str(tmp_path / "review.csv"),
+        corrections_csv=str(tmp_path / "corrections.csv"),
+        out_png=str(tmp_path / "out.png"),
+    )
+    defaults.update(overrides)
+    return PipelineArgs(**defaults), VideoMeta(
+        width=1920, height=1080, fps=60.0, frame_count=frame_count, duration_sec=duration_sec
+    )
+
+
+def test_pipeline_correction_only_modifies_target_row(tmp_path: Path, monkeypatch) -> None:
+    """Correction for t=0.0 must not alter rows at t=0.1 or t=0.2."""
+    args, meta = _make_ocr_pipeline_args(tmp_path, duration_sec=0.21, frame_count=20)
+
+    monkeypatch.setattr("storm_surge_border.pipeline.read_video_meta", lambda _p: meta)
+    monkeypatch.setattr("storm_surge_border.pipeline.VideoFrameReader", _FakeVideoFrameReader)
+    monkeypatch.setattr("storm_surge_border.pipeline._build_easyocr_reader", lambda **_kw: object())
+    monkeypatch.setattr("storm_surge_border.pipeline.write_plot_png", lambda _p, _r: None)
+    monkeypatch.setattr(
+        "storm_surge_border.pipeline.read_surge_from_frame",
+        lambda _roi, _reader: SurgeOcrValue(gap_value=100.0, is_above_border=True, confidence=1.0, raw_text="+100"),
+    )
+
+    write_review_csv(
+        args.corrections_csv,
+        [CorrectionRow(0.0, "duo_damage_diff", None, "999", "manual", "tester")],
+    )
+
+    result = run_pipeline(args)
+
+    assert len(result.estimates) >= 3
+    assert result.estimates[0].duo_damage_diff == 999.0
+    assert "manual-correction" in result.estimates[0].source_flags
+    # Rows at t=0.1 and t=0.2 must not carry the manual-correction flag.
+    for row in result.estimates[1:]:
+        assert "manual-correction" not in row.source_flags
+
+
+def test_pipeline_correction_for_nonexistent_timestamp_is_ignored(tmp_path: Path, monkeypatch) -> None:
+    """Correction targeting a timestamp absent from the timeline must be silently ignored."""
+    args, meta = _make_ocr_pipeline_args(tmp_path, duration_sec=0.11, frame_count=7)
+
+    monkeypatch.setattr("storm_surge_border.pipeline.read_video_meta", lambda _p: meta)
+    monkeypatch.setattr("storm_surge_border.pipeline.VideoFrameReader", _FakeVideoFrameReader)
+    monkeypatch.setattr("storm_surge_border.pipeline._build_easyocr_reader", lambda **_kw: None)
+    monkeypatch.setattr("storm_surge_border.pipeline.write_plot_png", lambda _p, _r: None)
+
+    write_review_csv(
+        args.corrections_csv,
+        [CorrectionRow(999.0, "duo_damage_diff", None, "500", "manual", "tester")],
+    )
+
+    result = run_pipeline(args)
+
+    # Pipeline must complete without error; no row should carry manual-correction.
+    assert len(result.estimates) >= 1
+    assert all("manual-correction" not in row.source_flags for row in result.estimates)
+
+
+def test_pipeline_correction_with_empty_corrected_value_is_skipped(tmp_path: Path, monkeypatch) -> None:
+    """A CorrectionRow where corrected_value is None (not yet filled in) must be ignored."""
+    args, meta = _make_ocr_pipeline_args(tmp_path, duration_sec=0.11, frame_count=7)
+
+    monkeypatch.setattr("storm_surge_border.pipeline.read_video_meta", lambda _p: meta)
+    monkeypatch.setattr("storm_surge_border.pipeline.VideoFrameReader", _FakeVideoFrameReader)
+    monkeypatch.setattr("storm_surge_border.pipeline._build_easyocr_reader", lambda **_kw: None)
+    monkeypatch.setattr("storm_surge_border.pipeline.write_plot_png", lambda _p, _r: None)
+
+    write_review_csv(
+        args.corrections_csv,
+        [CorrectionRow(0.0, "duo_damage_diff", "100", None, "", "")],
+    )
+
+    result = run_pipeline(args)
+
+    # Row at t=0.0 must not have been flagged as corrected.
+    assert all("manual-correction" not in row.source_flags for row in result.estimates)
 
 
 def test_pipeline_ocr_carry_confidence_decays(tmp_path: Path, monkeypatch) -> None:

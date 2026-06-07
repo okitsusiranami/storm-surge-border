@@ -12,7 +12,7 @@ def write_plot_png(file_path: str, rows: list[EstimateRow]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
     x = [r.timestamp_sec for r in rows]
-    y = [r.estimated_border for r in rows]
+    y = [r.estimated_border if r.estimated_border is not None else float("nan") for r in rows]
 
     fig, ax = plt.subplots(figsize=(12, 5))
     ax.plot(x, y, linewidth=1.2, color="#1f6aa5", label="estimated_border")
